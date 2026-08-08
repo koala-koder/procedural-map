@@ -1,16 +1,20 @@
+import multiprocessing
 import numpy as np
 from PIL import Image
 from numba import njit, prange
 from tqdm import tqdm
+
 
 # --- Fast Numba Perlin Generator ---
 @njit(fastmath=True)
 def fade(t):
     return t * t * t * (t * (t * 6 - 15) + 10)
 
+
 @njit(fastmath=True)
 def lerp(t, a, b):
     return a + t * (b - a)
+
 
 @njit(fastmath=True)
 def grad(hash_val, x, y):
@@ -19,8 +23,11 @@ def grad(hash_val, x, y):
     v = y if h < 4 else x
     return (u if (h & 1) == 0 else -u) + (v if (h & 2) == 0 else -v)
 
+
 @njit(parallel=True, fastmath=True)
-def generate_perlin_rows(world, start_row, end_row, scale, octaves, persistence, lacunarity, p):
+def generate_perlin_rows(
+    world, start_row, end_row, scale, octaves, persistence, lacunarity, p
+):
     width = world.shape[1]
 
     for i in prange(start_row, end_row):
@@ -56,7 +63,10 @@ def generate_perlin_rows(world, start_row, end_row, scale, octaves, persistence,
 
             world[i, j] = total
 
-def generate_perlin_world_with_progress(shape, scale, octaves, persistence, lacunarity, seed, chunk_size=500):
+
+def generate_perlin_world_with_progress(
+    shape, scale, octaves, persistence, lacunarity, seed, chunk_size=500
+):
     height, width = shape
     world = np.zeros((height, width), dtype=np.float32)
 
@@ -71,38 +81,19 @@ def generate_perlin_world_with_progress(shape, scale, octaves, persistence, lacu
         for start_row in range(0, height, chunk_size):
             end_row = min(start_row + chunk_size, height)
             generate_perlin_rows(
-                world, start_row, end_row, scale, octaves, persistence, lacunarity, p
+                world,
+                start_row,
+                end_row,
+                scale,
+                octaves,
+                persistence,
+                lacunarity,
+                p,
             )
             pbar.update(end_row - start_row)
 
     return world
 
-
-# Parameters - play around with these!
-ratio = (3, 4)                       # Ratio
-multiplier = 5000                   # Multiplier for ratio
-shape = (ratio[0]*multiplier,
-         ratio[1]*multiplier)        # Image size
-scale = 0.29 * multiplier            # Avoid abrupt changes between adjacent coordinates
-octaves = 16                         # Number of layers of noise (adds finer details)
-persistence = 0.5                    # How quickly AMPLITUDE DECREASES for subsequent octaves
-lacunarity = 2.0                     # How quickly FREQUENCY INCREASES for subsequent octaves
-seed = 1                             # Seed for noise
-
-# Generate noise using Numba with progress tracking
-world = generate_perlin_world_with_progress(
-    shape=shape,
-    scale=scale,
-    octaves=octaves,
-    persistence=persistence,
-    lacunarity=lacunarity,
-    seed=seed,
-    chunk_size=500  # Adjust chunk size to control progress update frequency
-)
-
-world_min, world_max = world.min(), world.max()
-world -= world_min
-world /= (world_max - world_min)
 
 # Color definitions (RGB)
 ocean = [65, 105, 225]
@@ -117,6 +108,7 @@ beach_thr = 0.54
 green_thr = 0.7
 mountain_thr = 0.8
 
+
 def add_color_with_progress(world_map, chunk_size=1000):
     height, width = world_map.shape
     color_world = np.zeros((height, width, 3), dtype=np.uint8)
@@ -125,23 +117,64 @@ def add_color_with_progress(world_map, chunk_size=1000):
     with tqdm(total=height, desc="Applying Colors", unit="row") as pbar:
         for start_row in range(0, height, chunk_size):
             end_row = min(start_row + chunk_size, height)
-            
+
             sub_map = world_map[start_row:end_row]
             sub_color = color_world[start_row:end_row]
 
             sub_color[sub_map < ocean_thr] = ocean
             sub_color[(sub_map >= ocean_thr) & (sub_map < beach_thr)] = beach
             sub_color[(sub_map >= beach_thr) & (sub_map < green_thr)] = green
-            sub_color[(sub_map >= green_thr) & (sub_map < mountain_thr)] = mountain
+            sub_color[(sub_map >= green_thr) & (sub_map < mountain_thr)] = (
+                mountain
+            )
             sub_color[sub_map >= mountain_thr] = snow
 
             pbar.update(end_row - start_row)
 
     return color_world
 
-# Generate colored image with progress tracking
-color_world = add_color_with_progress(world, chunk_size=1000)
-img = Image.fromarray(color_world, mode='RGB')
 
-# Save!
-img.save("map.png", compress_level=1)
+# --- Main Execution Guard for Executable Bundling ---
+if __name__ == "__main__":
+    # Prevents infinite sub-process spawning with Numba parallel mode in PyInstaller
+    multiprocessing.freeze_support()
+
+    # Parameters
+    ratio = (3, 4)  # Aspect Ratio
+    multiplier = 1000  # Multiplier for ratio
+    shape = (
+        ratio[0] * multiplier,
+        ratio[1] * multiplier,
+    )  # Image size
+    scale = 0.29 * multiplier
+    octaves = 16
+    persistence = 0.5
+    lacunarity = 2.0
+    seed = 11
+
+    # Generate noise using Numba with progress tracking
+    world = generate_perlin_world_with_progress(
+        shape=shape,
+        scale=scale,
+        octaves=octaves,
+        persistence=persistence,
+        lacunarity=lacunarity,
+        seed=seed,
+        chunk_size=500,
+    )
+
+    # Normalize map values between 0.0 and 1.0
+    world_min, world_max = world.min(), world.max()
+    world -= world_min
+    world /= world_max - world_min
+
+    # Generate colored image with progress tracking
+    color_world = add_color_with_progress(world, chunk_size=1000)
+    img = Image.fromarray(color_world, mode="RGB")
+
+    # Save output
+    img.save("map.png", compress_level=1)
+    print("\nMap successfully saved to 'map.png'!")
+
+    # Keep terminal open so progress bars remain visible
+    input("\nProcess finished! Press Enter to exit...")
