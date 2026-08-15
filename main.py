@@ -1,8 +1,10 @@
 import multiprocessing
+from matplotlib.pyplot import grid
 import numpy as np
 from PIL import Image
 from numba import njit, prange
 from tqdm import tqdm
+import pyvista as pv
 
 
 # --- Fast Numba Perlin Generator ---
@@ -105,9 +107,23 @@ snow = [255, 255, 255]
 # Thresholds (0.0 to 1.0)
 ocean_thr = 0.45
 beach_thr = 0.54
-green_thr = 0.7
-mountain_thr = 0.8
+green_thr = 0.75
+mountain_thr = 0.90
 
+
+def apply_elevation_curve(noisevalue):
+    """
+    Applies a curve to the noise value to adjust elevation distribution.
+    This is because, naturally, low land areas (greenery and beaches) 
+    rise more slowly than mountains, which rise more sharply.
+    """
+
+    thr_points = [0, ocean_thr, beach_thr, green_thr, mountain_thr, 1.0]
+
+    # Define custom Z values for each threshold
+    elevation_points = [0.0, 0.0, 0.02, 0.20, 0.60, 1.0]
+
+    return np.interp(noisevalue, thr_points, elevation_points)
 
 def add_color_with_progress(world_map, chunk_size=1000):
     height, width = world_map.shape
@@ -133,6 +149,45 @@ def add_color_with_progress(world_map, chunk_size=1000):
 
     return color_world
 
+def render_3d(elevation_map, color_world, z_scale=250.0):
+    """
+    Renders 3D terrain with planar UV projection and horizontal alignment fix.
+    """
+    print("\nRendering 3D Terrain...")
+    length, width = elevation_map.shape
+
+    # Downsample geometry grid for performance
+    step = max(1, length // 1000)
+    elev_sub = elevation_map[::step, ::step]
+
+    sub_height, sub_width = elev_sub.shape
+    x = np.arange(0, sub_width) * step
+    y = np.arange(0, sub_height) * step
+    x_grid, y_grid = np.meshgrid(x, y)
+
+    z_grid = elev_sub * z_scale
+
+    # 1. Build heightmap mesh geometry
+    grid = pv.StructuredGrid(x_grid, y_grid, z_grid)
+
+    # 2. Anchor UV plane bounds to match grid coordinates exactly
+    x_max = (sub_width - 1) * step
+    y_max = (sub_height - 1) * step
+
+    grid = grid.texture_map_to_plane(
+        origin=(0, 0, 0),
+        point_u=(x_max, 0, 0),
+        point_v=(0, y_max, 0)
+    )
+
+    # 3. Flip texture horizontally to correct X-axis orientation
+    texture = pv.numpy_to_texture(np.flipud(color_world))
+
+    print("Opening 3D viewer window...")
+    plotter = pv.Plotter()
+    plotter.add_mesh(grid, texture=texture, smooth_shading=True)
+    plotter.show()
+
 
 # --- Main Execution Guard for Executable Bundling ---
 if __name__ == "__main__":
@@ -147,10 +202,10 @@ if __name__ == "__main__":
         ratio[1] * multiplier,
     )  # Image size
     scale = 0.29 * multiplier
-    octaves = 16
+    octaves = 64
     persistence = 0.5
     lacunarity = 2.0
-    seed = 11
+    seed = 1
 
     # Generate noise using Numba with progress tracking
     world = generate_perlin_world_with_progress(
@@ -168,6 +223,9 @@ if __name__ == "__main__":
     world -= world_min
     world /= world_max - world_min
 
+    # Apply elevation slopes
+    elevation_map = apply_elevation_curve(world)
+
     # Generate colored image with progress tracking
     color_world = add_color_with_progress(world, chunk_size=1000)
     img = Image.fromarray(color_world, mode="RGB")
@@ -175,6 +233,9 @@ if __name__ == "__main__":
     # Save output
     img.save("map.png", compress_level=1)
     print("\nMap successfully saved to 'map.png'!")
+
+    # Render 3D terrain
+    render_3d(elevation_map, color_world, z_scale=multiplier * 0.2)
 
     # Keep terminal open so progress bars remain visible
     input("\nProcess finished! Press Enter to exit...")
