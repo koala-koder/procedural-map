@@ -1,5 +1,4 @@
 import multiprocessing
-from matplotlib.pyplot import grid
 import numpy as np
 from PIL import Image
 from numba import njit, prange
@@ -180,7 +179,7 @@ def render_3d(elevation_map, color_world, z_scale=250.0):
         point_v=(0, y_max, 0)
     )
 
-    # 3. Flip texture horizontally to correct X-axis orientation
+    # 3. Flip texture horizontally to correct Y-axis orientation
     texture = pv.numpy_to_texture(np.flipud(color_world))
 
     print("Opening 3D viewer window...")
