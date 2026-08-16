@@ -95,6 +95,20 @@ def generate_perlin_world_with_progress(
 
     return world
 
+def apply_radial_mask(world, strength=5.0):
+    height, width = world.shape
+
+    y = np.linspace(-1.0, 1.0, height)
+    x = np.linspace(-1.0, 1.0, width)
+    grid_y, grid_x = np.meshgrid(y, x, indexing="ij")
+
+    # Normalized distance from center [0.0 at center, 1.0 at corners]
+    dist_norm = np.sqrt(grid_x**2 + grid_y**2) / np.sqrt(2.0)
+
+    # Logarithmic curve: np.log(1 + a * (1 - d)) / np.log(1 + a)
+    gradient = np.log(1.0 + strength * (1.0 - dist_norm)) / np.log(1.0 + strength)
+
+    return world * gradient
 
 # Color definitions (RGB)
 ocean = [65, 105, 225]
@@ -195,7 +209,7 @@ if __name__ == "__main__":
 
     # Parameters
     ratio = (3, 4)  # Aspect Ratio
-    multiplier = 1000  # Multiplier for ratio
+    multiplier = 2500  # Multiplier for ratio
     shape = (
         ratio[0] * multiplier,
         ratio[1] * multiplier,
@@ -204,7 +218,7 @@ if __name__ == "__main__":
     octaves = 64
     persistence = 0.5
     lacunarity = 2.0
-    seed = 1
+    seed = 0
 
     # Generate noise using Numba with progress tracking
     world = generate_perlin_world_with_progress(
@@ -222,6 +236,9 @@ if __name__ == "__main__":
     world -= world_min
     world /= world_max - world_min
 
+    # Apply radial mask to create island effect
+    world = apply_radial_mask(world)
+
     # Apply elevation slopes
     elevation_map = apply_elevation_curve(world)
 
@@ -234,7 +251,7 @@ if __name__ == "__main__":
     print("\nMap successfully saved to 'map.png'!")
 
     # Render 3D terrain
-    render_3d(elevation_map, color_world, z_scale=multiplier * 0.2)
+    render_3d(elevation_map, color_world, z_scale=multiplier * (scale / multiplier) * 0.69)
 
     # Keep terminal open so progress bars remain visible
     input("\nProcess finished! Press Enter to exit...")
